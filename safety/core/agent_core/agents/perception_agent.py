@@ -4,16 +4,18 @@
 
 from safety.core.agent_core.datamodels import TaskMemory, PerceptionResult
 from safety.core.agent_core.tool_registry import ToolRegistry
+from safety.core.agent_core.logger import PipelineLogger
 
 class PerceptionAgent:
     """感知智能体：只做视觉证据提取，不做风险研判"""
     name = "PerceptionAgent"
 
-    def __init__(self, tool_registry: ToolRegistry):
+    def __init__(self, tool_registry: ToolRegistry, logger: PipelineLogger):
         self.tool_registry = tool_registry
+        self.logger = logger
 
     def run(self, task_memory: TaskMemory, **kwargs) -> PerceptionResult:
-        print(f'\n------ [感知 Agent 开始执行] task id：{task_memory.task_id} ------')
+        self.logger.info(f'\n------ [感知 Agent 开始执行] task id：{task_memory.task_id} ------')
         input_path = task_memory.input_path
         task_type = task_memory.task_type
 
@@ -41,7 +43,7 @@ class PerceptionAgent:
         else:
             raise ValueError(f'不支持的任务类型:{task_type}')
 
-        print(f'感知 Agent 完成, 检测到目标数量：{len(perception_result.bboxes)}')
+        self.logger.info(f'感知 Agent 完成, 检测到目标数量：{len(perception_result.bboxes)}')
         # 出入历史记录
         task_memory.perception_history.append(perception_result)
         return perception_result

@@ -1,6 +1,7 @@
 from abc import ABC
 from typing import Dict, Any
 from safety.core.agent_core.datamodels import TaskMemory, ToolCallRecord
+from safety.core.agent_core.logger import PipelineLogger
 
 class BaseTool(ABC):
     """工具抽象类"""
@@ -12,15 +13,17 @@ class BaseTool(ABC):
 
 class ToolRegistry:
     "工具注册器"
-    def __init__(self):
+    def __init__(self, logger: PipelineLogger):
         self.tools: Dict[str, BaseTool] = {}
+        self.logger = logger
 
     def register(self, tool: BaseTool):
         self.tools[tool.name] = tool
-        print(f'[Register Tool] Tool name: {tool.name}')
+        self.logger.info(f'[工具注册] Tool name: {tool.name}')
 
     def call(self, tool_name: str, agent_name: str, task_memory: TaskMemory, **kwargs):
         if tool_name not in self.tools:
+            self.logger.error(f'工具 {tool_name} 未注册')
             raise ValueError(f'Tool {tool_name} not registered')
         tool = self.tools[tool_name]
         print(f'[Call Tool] Tool name: {tool.name}')
