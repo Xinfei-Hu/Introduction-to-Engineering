@@ -1,0 +1,17 @@
+[
+    {
+        "keywords": ["安全帽", "未佩戴"],
+        "require_yolo_target": "person",
+        "desc": "人员头部防护类隐患"
+    },
+    {
+        "keywords": ["反光安全背心"],
+        "require_yolo_target": "person",
+        "desc": "人员着装防护类隐患"
+    },
+    {
+        "keywords": ["脚手架", "脚手架防护"],
+        "require_yolo_target": null,
+        "desc": "脚手架设施隐患"
+    }
+]
