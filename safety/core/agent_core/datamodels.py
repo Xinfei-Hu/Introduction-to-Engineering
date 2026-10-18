@@ -82,6 +82,12 @@ class TaskMemory:
     review_history: List[ReviewResult] = field(default_factory=list)
     all_tool_logs: List[ToolCallRecord] = field(default_factory=list)
 
+    # ---------- 媒体帧相关字段 -------------
+    frame_paths: List[str] = field(default_factory=list)  # 所有帧图片路径列表
+    frame_timestamps: List[float] = field(default_factory=list)  # 对应帧的时间戳
+    current_frame_path: str = ""  # 当前正在处理的帧图片路径
+    current_frame_time: float = 0.0  # 当前对应的视频时间
+
     @staticmethod
     def create_new_task(input_path: str, task_type: str, max_iter: int = 2):
         task_id = str(uuid.uuid4())

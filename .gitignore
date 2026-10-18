@@ -61,3 +61,5 @@ staticfiles/
 # ===== 临时文件 =====
 *.tmp
 *.bak
+
+safety/core/media

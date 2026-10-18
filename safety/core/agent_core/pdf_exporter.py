@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 from reportlab.lib.pagesizes import A4
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
 from reportlab.pdfbase import pdfmetrics
@@ -19,12 +19,13 @@ FONT_NAME = "STSong-Light"
 class PdfExporter:
     """
     OOP 工地安全检测PDF导出器
-    对接本项目多Agent流水线TaskMemory，生成A4检测报告，包含整改建议列
+    ✅ 支持图片单帧 / 视频多帧流水线，生成统一A4检测报告
+    ✅ 视频报告：汇总全帧隐患，可附加多帧标注截图，标注隐患出现的帧时间
     """
     # 配置常量，统一在这里修改
     PAGE_SIZE = A4
     MAX_IMG_WIDTH_MM = 160
-    MAX_IMG_HEIGHT_MM = 180
+    MAX_IMG_HEIGHT_MM = 160
 
     def __init__(self):
         self.styles = getSampleStyleSheet()
@@ -43,12 +44,18 @@ class PdfExporter:
             fontName=FONT_NAME,
             fontSize=11
         )
+        self.small_style = ParagraphStyle(
+            'ReportSmall',
+            parent=self.styles["Normal"],
+            fontName=FONT_NAME,
+            fontSize=9
+        )
 
     @staticmethod
     def get_scaled_image(img_path: str, max_width_mm: float, max_height_mm: float):
         """静态方法：读取图片，按宽高限制等比例缩放，返回reportlab图片对象"""
-        if not os.path.exists(img_path):
-            raise FileNotFoundError(f"图片文件不存在：{img_path}")
+        if not img_path or not os.path.exists(img_path):
+            return None
         max_width = max_width_mm * mm
         max_height = max_height_mm * mm
         with PILImage.open(img_path) as im:
@@ -67,23 +74,34 @@ class PdfExporter:
         return Image(img_path, width=new_w, height=new_h)
 
     def build_hazard_table(self, hazard_list):
-        """构造隐患表格：隐患类型｜风险等级｜隐患描述｜整改建议"""
+        """
+        构造隐患表格：
+        【隐患类型｜风险等级｜检出帧时间｜隐患描述｜整改建议】
+        单图片任务：帧时间显示 "-"
+        """
         table_data = [
             [
                 Paragraph("隐患类型", self.normal_style),
                 Paragraph("风险等级", self.normal_style),
+                Paragraph("检出帧时间(s)", self.normal_style),
                 Paragraph("隐患描述", self.normal_style),
                 Paragraph("整改建议", self.normal_style)
             ]
         ]
-        # 4列宽度分配
-        col_widths = [30 * mm, 20 * mm, 55 * mm, 55 * mm]
+        # 5列宽度分配
+        col_widths = [26 * mm, 20 * mm, 22 * mm, 46 * mm, 46 * mm]
 
         if hazard_list and len(hazard_list) > 0:
             for hazard in hazard_list:
+                # 兼容：如果hazard没有frame_time属性，填充 "-"
+                frame_time_val = getattr(hazard, "frame_time", "-")
+                if isinstance(frame_time_val, float):
+                    frame_time_val = f"{frame_time_val:.2f}"
+
                 row = [
                     Paragraph(hazard.danger_type, self.normal_style),
                     Paragraph(hazard.risk_level, self.normal_style),
+                    Paragraph(str(frame_time_val), self.normal_style),
                     Paragraph(hazard.description, self.normal_style),
                     Paragraph(hazard.suggestion, self.normal_style)
                 ]
@@ -92,12 +110,13 @@ class PdfExporter:
             row = [
                 Paragraph("无隐患", self.normal_style),
                 Paragraph("-", self.normal_style),
+                Paragraph("-", self.normal_style),
                 Paragraph("现场未发现安全违规", self.normal_style),
                 Paragraph("保持现有作业规范", self.normal_style)
             ]
             table_data.append(row)
 
-        table = Table(table_data, colWidths=col_widths)
+        table = Table(table_data, colWidths=col_widths, repeatRows=1)
         table_style = TableStyle([
             ('FONTNAME', (0, 0), (-1, -1), FONT_NAME),
             ('BACKGROUND', (0, 0), (-1, 0), '#dddddd'),
@@ -115,7 +134,6 @@ class PdfExporter:
             [Paragraph("冲突编号", self.normal_style), Paragraph("冲突描述", self.normal_style)]
         ]
         for idx, item in enumerate(conflict_logs):
-            # 适配你的冲突字典key
             conflict_text = item["conflict"]
             row = [
                 Paragraph(f"{idx+1}", self.normal_style),
@@ -132,14 +150,23 @@ class PdfExporter:
         table.setStyle(table_style)
         return table
 
-    def export(self, pdf_save_path: str, original_img_path: str, marked_img_path: str, task_mem: TaskMemory, hazard_list):
+    def export(self,
+               pdf_save_path: str,
+               original_img_path: str,
+               marked_img_path: str,
+               task_mem: TaskMemory,
+               hazard_list,
+               all_marked_paths: list[str] = None,
+               media_type: str = "image"):
         """
-        主导出方法
+        主导出方法，向下兼容旧图片调用，新增视频支持
         :param pdf_save_path: PDF输出路径
-        :param original_img_path: 原始图片路径
-        :param marked_img_path: YOLO标注框图片路径
+        :param original_img_path: 主预览图（视频填第一帧图片路径）
+        :param marked_img_path: 主标注预览图（视频填第一帧标注图）
         :param task_mem: TaskMemory任务上下文（包含conflict_logs）
         :param hazard_list: 复核完成后的隐患列表 review输出结果
+        :param all_marked_paths: 【视频可选】全部帧标注图路径列表，追加到报告
+        :param media_type: "image" / "video"
         """
         # 自动创建保存目录
         out_dir = os.path.dirname(pdf_save_path)
@@ -149,42 +176,66 @@ class PdfExporter:
         doc = SimpleDocTemplate(pdf_save_path, pagesize=self.PAGE_SIZE)
         story = []
 
-        # 报告头部信息
+        # ========== 报告头部信息 ==========
         report_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         story.append(Paragraph("施工现场安全隐患检测报告", self.title_style))
         story.append(Spacer(1, 5 * mm))
         story.append(Paragraph(f"报告生成时间：{report_time}", self.normal_style))
         story.append(Paragraph(f"任务ID：{task_mem.task_id}", self.normal_style))
-        story.append(Spacer(1, 5 * mm))
+        story.append(Paragraph(f"媒体类型：{'图片' if media_type == 'image' else '视频'}", self.normal_style))
 
+        # 视频额外信息
+        if media_type == "video" and hasattr(task_mem, "frame_paths"):
+            total_frame_count = len(task_mem.frame_paths)
+            story.append(Paragraph(f"抽帧总数：{total_frame_count} 帧", self.normal_style))
+
+        story.append(Spacer(1, 5 * mm))
         risk_count = len(hazard_list)
         story.append(Paragraph(f"隐患总数量：{risk_count} 处", self.normal_style))
         story.append(Spacer(1, 5 * mm))
 
-        # 原图
-        story.append(Paragraph("【原始图片】", self.normal_style))
+        # ========== 主预览图：原图 ==========
+        story.append(Paragraph("【主预览 - 原始画面】", self.normal_style))
         img_origin = self.get_scaled_image(original_img_path, self.MAX_IMG_WIDTH_MM, self.MAX_IMG_HEIGHT_MM)
-        story.append(img_origin)
+        if img_origin:
+            story.append(img_origin)
+        else:
+            story.append(Paragraph("原始图片文件不存在", self.small_style))
         story.append(Spacer(1, 5 * mm))
 
-        # YOLO标注图
-        story.append(Paragraph("【YOLO目标标注图】", self.normal_style))
+        # ========== 主预览图：YOLO标注图 ==========
+        story.append(Paragraph("【主预览 - YOLO目标标注图】", self.normal_style))
         img_mark = self.get_scaled_image(marked_img_path, self.MAX_IMG_WIDTH_MM, self.MAX_IMG_HEIGHT_MM)
-        story.append(img_mark)
+        if img_mark:
+            story.append(img_mark)
+        else:
+            story.append(Paragraph("标注图片文件不存在", self.small_style))
         story.append(Spacer(1, 8 * mm))
 
-        # 隐患表格（带整改建议）
+        # ========== 隐患清单表格 ==========
         risk_table = self.build_hazard_table(hazard_list)
         story.append(Paragraph("【识别隐患清单】", self.normal_style))
         story.append(risk_table)
         story.append(Spacer(1, 6 * mm))
 
-        # 多Agent冲突记录（课题亮点）
+        # ========== 多Agent冲突记录 ==========
         conflict_logs = getattr(task_mem, "conflict_logs", [])
         if conflict_logs and len(conflict_logs) > 0:
             story.append(Paragraph("【多智能体意见冲突记录】", self.normal_style))
             conflict_table = self.build_conflict_table(conflict_logs)
             story.append(conflict_table)
+
+        # ========== 【视频专属】追加全部帧标注截图（可选） ==========
+        if media_type == "video" and all_marked_paths and len(all_marked_paths) > 0:
+            story.append(PageBreak())
+            story.append(Paragraph("【视频各帧标注截图】", self.normal_style))
+            story.append(Spacer(1, 3*mm))
+            for idx, mark_img_p in enumerate(all_marked_paths):
+                frame_img = self.get_scaled_image(mark_img_p, max_width_mm=150, max_height_mm=140)
+                if frame_img:
+                    story.append(Paragraph(f"帧 {idx+1} 标注图", self.small_style))
+                    story.append(frame_img)
+                    story.append(Spacer(1,4*mm))
 
         doc.build(story)
         print(f"PDF报告生成成功：{pdf_save_path}")
